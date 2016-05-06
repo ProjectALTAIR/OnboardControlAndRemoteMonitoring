@@ -243,12 +243,12 @@ void setup() {
   TCCR4A = _BV(COM4A1) | _BV(COM4B1) | _BV(COM4C1) | _BV(WGM42) | _BV(WGM41);
   TCCR4B = _BV(CS42);
 
-  OCR3A = 32 + 2*setting[0];
-  OCR3B = 32 + 2*setting[1];
-  OCR3C = 32 + 2*setting[2];
-  OCR4A = 32 + 2*setting[3];
-  OCR4B = 32 + 2*setting[4];
-  OCR4C = 32 + 2*setting[5];
+  OCR3A = 32 + 2 * setting[0]; //pin 5, servo 0
+  OCR3C = 32 + 2 * setting[1]; //pin 3, servo 1
+  OCR4B = 32 + 2 * setting[2]; //pin 7, servo 2
+  OCR4A = 32 + 2 * setting[3]; //pin 6, servo 3
+  OCR3B = 32 + 2 * setting[4]; //pin 2,
+  OCR4C = 32 + 2 * setting[5]; //pin 8, axle servo
 }
 
 void loop() {
@@ -449,12 +449,12 @@ void loop() {
  
  
   if (thingsHaveChanged) {
-    OCR3A = 32 + 2*setting[0];
-    OCR3B = 32 + 2*setting[1];
-    OCR3C = 32 + 2*setting[2];
-    OCR4A = 32 + 2*setting[3];
-    OCR4B = 32 + 2*setting[4];
-    OCR4C = 32 + 2*setting[5];
+    OCR3A = 32 + 2 * setting[0]; //pin 5, servo 0
+    OCR3C = 32 + 2 * setting[1]; //pin 3, servo 1
+    OCR4B = 32 + 2 * setting[2]; //pin 7, servo 2
+    OCR4A = 32 + 2 * setting[3]; //pin 6, servo 3
+    OCR3B = 32 + 2 * setting[4]; //pin 2,
+    OCR4C = 32 + 2 * setting[5]; //pin 8, axle servo
   }
 
     
