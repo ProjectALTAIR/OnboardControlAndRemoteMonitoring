@@ -1,36 +1,42 @@
 import processing.serial.*;
+import processing.sound.*;
 
-final boolean testArduinoUnconnected = true;
+final boolean testArduinoUnconnected =  true;
 final String  fontString             = "SourceCodePro-Regular";
 final String  arduinoPortString      = "tty.usbmodem";
 final int     portSpeed              =  9600;
+final int     numAlarms              =    22;
+final int     timeBetweenAlarmSounds =    30;    // in approximately 20's of milliseconds (so e.g. a value of 30 ~= 0.6 seconds)
 final float   gravAcc                =     9.81; // m/s^2
 
 final float   maxSetting             =    10.0;  // max power setting for each motor: setting ranges from 0 - 10
 final float   maxRPM                 =  5000.0;
 final float   maxTemp                =    50.0;  // degrees C
 final float   minTemp                =   -50.0;  // degrees C
-final float   maxCurrent             =    10.0;  // Amperes (per each motor+ESC)
+final float   maxCurrent             =    10.0;  // Amperes (per each motor+ESC pair)
 
 final int     buttonSquareSize       =    12;    // pixels
 final int     buttonSqCornerRadius   =     6;    // pixels 
 final int     buttonSpacing          =    15;    // pixels
 
-float    oldyaw = 0., oldpitch = 0., oldroll = 0.;
+float         oldyaw = 0., oldpitch = 0., oldroll = 0.;
 
-PFont    mainFont, smallFont;
+PFont         mainFont, smallFont;
 
-Serial   port;
-boolean  blockButtons = false;
+Serial        port;
+SoundFile     alarm;
+boolean       blockButtons = false;
+byte[]        alarmOn      = new byte[numAlarms]; // 0 == off, 1 == on but silenced, 2 == on (and not silenced)
+int           alarmCounter = 0;
 
-float[]  setting      = new float[7];
-float[]  rpm          = new float[4];
-float[]  current      = new float[4];
-float[]  temp         = new float[8];
-float[]  accel        = new float[3];
-float[]  propRotAng   = new float[6];
-float    yaw, pitch, roll, rotAng;
-float    UM7health, UM7temp;
+float[]       setting      = new float[7];
+float[]       rpm          = new float[4];
+float[]       current      = new float[4];
+float[]       temp         = new float[8];
+float[]       accel        = new float[3];
+float[]       propRotAng   = new float[6];
+float         yaw, pitch, roll, rotAng;
+float         UM7health, UM7temp;
  
 void setup()  { 
   size(1200, 600, P3D); 
@@ -49,12 +55,15 @@ void setup()  {
     exit();
   } else {
     if (!testArduinoUnconnected) {
-      port = new Serial(this, arduinoPortName, portSpeed);
+      port     = new Serial(this, arduinoPortName, portSpeed);
       print("Connected to ALTAIR via serial port: "); println(arduinoPortName); 
     }
 
-    mainFont  = createFont(fontString, 17);
-    smallFont = createFont(fontString, 10);
+    alarm      = new SoundFile(this, "/Users/jalbert/Documents/Processing/sketch_160421a/Arrow.wav");
+    for (int i = 0; i < numAlarms; ++i) alarmOn[i] = 0;
+
+    mainFont   = createFont(fontString, 17);
+    smallFont  = createFont(fontString, 10);
     textFont(mainFont);
     textAlign(LEFT);
   }
@@ -89,13 +98,13 @@ void getAltairArduinoInfoLine() {
           for (int i = 0; i < 4; ++i) rpm[i]     = altairValues[i+7];
           for (int i = 0; i < 4; ++i) current[i] = altairValues[i+11];               // in amps
           for (int i = 0; i < 8; ++i) temp[i]    = altairValues[i+15];               // in degrees C
-          for (int i = 0; i < 3; ++i) accel[i]   = altairValues[i+23];               // in m/s^2
+          for (int i = 0; i < 3; ++i) accel[i]   = altairValues[i+23];               // in "gravities" (converted to m/s^2 below)
           yaw = altairValues[26]; pitch = altairValues[27]; roll = altairValues[28]; // in degrees
           rotAng = altairValues[29];  // propulsion axle rotation angle (wrt a perfect vertical alignment with the gondola body), in degrees
           UM7health = altairValues[30]; UM7temp = altairValues[31];
-          accel[2] += cos(radians(pitch))*cos(radians(roll));  accel[2] *= gravAcc;
-          accel[1] += cos(radians(pitch))*sin(radians(roll));  accel[1] *= gravAcc;
-          accel[0] -= sin(radians(pitch));                     accel[0] *= gravAcc;          
+          accel[2] += cos(radians(pitch))*cos(radians(roll));  accel[2] *= gravAcc;  // Subtract off Earth's gravitational acceleration, so that
+          accel[1] += cos(radians(pitch))*sin(radians(roll));  accel[1] *= gravAcc;  // "hovering" should result in IDENTICALLY 0 ACCELERATION,
+          accel[0] -= sin(radians(pitch));                     accel[0] *= gravAcc;  // and *= by 9.81, in order to convert "gravities" to m/s^2.        
         }
       }
     }
@@ -124,104 +133,111 @@ void displayPropulsionSystemInfo() {
     if (i > 1) isRight = 1;
 
     float fillHeight = 40.*(setting[i]/(maxSetting*1.2)), fillHeightESC;
-    int redAlert = 0, redAlertESC = 0, motorIsRed = 0, escIsRed = 0, propIsRed = 0, propIsGreen = 0;
-    if (setting[i] > maxSetting || setting[i] < 0.) redAlert = 1;
+    int motorIsRed = 0, escIsRed = 0, propIsRed = 0, propIsGreen = 0;
+    if (setting[i] > maxSetting || setting[i] < 0.) if (alarmOn[i] == 0) alarmOn[i] = 2;                                                      
+    else                                            alarmOn[i] = 0;
     fill(color(1.,1.,1.));
     ellipse(18.  + 235.*i + 240.*isRight, 465.  - 30.*isHigh,                 4., 40.);
-    fill(color(1.*redAlert,0.7*(1-redAlert),0));
+    fill(color(1.*(alarmOn[i] > 0 ? 1 : 0),0.7*(alarmOn[i] > 0 ? 0 : 1),0));
     noStroke();
     ellipse(18.5 + 235.*i + 240.*isRight, 483.5 - 30.*isHigh - fillHeight/2., 3., fillHeight);
     stroke(0);
-    drawType("Power",              30. + 235.*i + 240.*isRight, 460. - 30.*isHigh, 1.*redAlert,      0.,                 0.);
-    drawType("set at:",            83. + 235.*i + 240.*isRight, 460. - 30.*isHigh, 1.*redAlert,      0.,                 0.);
+    drawType("Power",              30. + 235.*i + 240.*isRight, 460. - 30.*isHigh, 1.*(alarmOn[i] > 0 ? 1 : 0),   0.,                             0.);
+    drawType("set at:",            83. + 235.*i + 240.*isRight, 460. - 30.*isHigh, 1.*(alarmOn[i] > 0 ? 1 : 0),   0.,                             0.);
     textAlign(RIGHT);
-    drawType(nf(setting[i],1,1),  186. + 235.*i + 240.*isRight, 460. - 30.*isHigh, 1.*redAlert,      0.6*(1-redAlert),   0.);
+    drawType(nf(setting[i],1,1),  186. + 235.*i + 240.*isRight, 460. - 30.*isHigh, 1.*(alarmOn[i] > 0 ? 1 : 0),   0.6*(alarmOn[i] > 0 ? 0 : 1),   0.);
     textFont(smallFont);
-    drawType(nf(int(maxSetting)),  14. + 235.*i + 240.*isRight, 456. - 30.*isHigh, 0.35,             0.35,               0.);    
-    drawType("0",                  14. + 235.*i + 240.*isRight, 486. - 30.*isHigh, 0.35,             0.35,               0.);
+    drawType(nf(int(maxSetting)),  14. + 235.*i + 240.*isRight, 456. - 30.*isHigh, 0.35,                          0.35,                           0.);    
+    drawType("0",                  14. + 235.*i + 240.*isRight, 486. - 30.*isHigh, 0.35,                          0.35,                           0.);
     textFont(mainFont);
     textAlign(LEFT);
-    drawType("/10",               185. + 235.*i + 240.*isRight, 460. - 30.*isHigh,   0.,             0.,                 0.);
+    drawType("/10",               185. + 235.*i + 240.*isRight, 460. - 30.*isHigh,   0.,                          0.,                             0.);
     makeButtons(                  218. + 235.*i + 240.*isRight, 443. - 30.*isHigh,   i);
 
     fillHeight = 40.*(rpm[i]/(maxRPM*1.2));
     if (rpm[i] > 0.)                    { propIsGreen = 1;
-                                          if (isHigh == 1) { upperPropIsGreen = 1 - upperPropIsRed; }
-                                          else             { lowerPropIsGreen = 1 - lowerPropIsRed; }
+                                          if (isHigh == 1)   { upperPropIsGreen = 1 - upperPropIsRed; }
+                                          else               { lowerPropIsGreen = 1 - lowerPropIsRed; }
                                         }
-    if (rpm[i] > maxRPM || rpm[i] < 0.) { redAlert = 1; motorIsRed = 1; propIsRed = 1; propIsGreen = 0;
-                                          if (isHigh == 1) { upperMotorIsRed = 1; upperPropIsRed = 1; upperPropIsGreen = 0; }
-                                          else             { lowerMotorIsRed = 1; lowerPropIsRed = 1; lowerPropIsGreen = 0; }
+    if (rpm[i] > maxRPM || rpm[i] < 0.) { motorIsRed = 1; propIsRed = 1; propIsGreen = 0;
+                                          if (isHigh == 1)   { upperMotorIsRed = 1; upperPropIsRed = 1; upperPropIsGreen = 0; }
+                                          else               { lowerMotorIsRed = 1; lowerPropIsRed = 1; lowerPropIsGreen = 0; }
+                                          if (alarmOn[i+4] == 0) alarmOn[i+4] = 2;
                                         } 
-    else                                { redAlert = 0; }
+    else                                { alarmOn[i+4] = 0; }
     fill(color(1.,1.,1.));
     ellipse(71.  + 235.*i + 240.*isRight, 490.  - 30.*isHigh,                 4., 40.);
-    fill(color(1.*redAlert,0.7*(1-redAlert),0));
+    fill(color(1.*(alarmOn[i+4] > 0 ? 1 : 0), 0.7*(alarmOn[i+4] > 0 ? 0 : 1), 0));
     noStroke();
     ellipse(71.5 + 235.*i + 240.*isRight, 508.5 - 30.*isHigh - fillHeight/2., 3., fillHeight);
     stroke(0);
-    drawType("RPM:",               83. + 235.*i + 240.*isRight, 500. - 30.*isHigh, 1.*redAlert,      0.,                 0.); 
+    drawType("RPM:",               83. + 235.*i + 240.*isRight, 500. - 30.*isHigh, 1.*(alarmOn[i+4] > 0 ? 1 : 0), 0.,                             0.); 
     textAlign(RIGHT);
-    drawType(nf(int(rpm[i])),     173. + 235.*i + 240.*isRight, 500. - 30.*isHigh, 1.*redAlert,      0.6*(1-redAlert),   0.);
+    drawType(nf(int(rpm[i])),     173. + 235.*i + 240.*isRight, 500. - 30.*isHigh, 1.*(alarmOn[i+4] > 0 ? 1 : 0), 0.6*(alarmOn[i+4] > 0 ? 0 : 1), 0.);
     textFont(smallFont);
-    drawType(nf(int(maxRPM)),      67. + 235.*i + 240.*isRight, 481. - 30.*isHigh, 0.35,             0.35,               0.);    
-    drawType("0",                  67. + 235.*i + 240.*isRight, 511. - 30.*isHigh, 0.35,             0.35,               0.);
+    drawType(nf(int(maxRPM)),      67. + 235.*i + 240.*isRight, 481. - 30.*isHigh, 0.35,                          0.35,                           0.);    
+    drawType("0",                  67. + 235.*i + 240.*isRight, 511. - 30.*isHigh, 0.35,                          0.35,                           0.);
     textFont(mainFont);
     textAlign(LEFT);
 
     fillHeight    = 40.*((temp[i]   - minTemp)/((maxTemp - minTemp)*1.2));
     fillHeightESC = 40.*((temp[i+4] - minTemp)/((maxTemp - minTemp)*1.2));
-    if (temp[i]   > maxTemp || temp[i]   < minTemp) { redAlert    = 1; motorIsRed = 1;
+    if (temp[i]   > maxTemp || temp[i]   < minTemp) { motorIsRed = 1;
                                                       if (isHigh == 1) { upperMotorIsRed = 1; }
                                                       else             { lowerMotorIsRed = 1; }
+                                                      if (alarmOn[i+8] == 0)  alarmOn[i+8]  = 2;
                                                     } 
-    else                                            { redAlert    = 0; }
-    if (temp[i+4] > maxTemp || temp[i+4] < minTemp) { redAlertESC = 1; escIsRed   = 1;} else {redAlertESC = 0;}
+    else                                            { alarmOn[i+8]  = 0; }
+    if (temp[i+4] > maxTemp || temp[i+4] < minTemp) { escIsRed = 1;
+                                                      if (alarmOn[i+12] == 0) alarmOn[i+12] = 2;
+                                                    } 
+    else                                            { alarmOn[i+12] = 0; }
     fill(color(1.,1.,1.));
     ellipse( 71.  + 235.*i + 240.*isRight, 535.  - 30.*isHigh,                 4., 40.);
     ellipse(190.  + 190.*i + 115.*isRight, 340.              ,                 4., 40.);
     noStroke();
-    fill(color(1.*redAlert,   0.7*(1-redAlert),   0));
+    fill(color(1.*(alarmOn[i+8]  > 0 ? 1 : 0), 0.7*(alarmOn[i+8]  > 0 ? 0 : 1), 0));
     ellipse( 71.5 + 235.*i + 240.*isRight, 553.5 - 30.*isHigh - fillHeight/2.,    3., fillHeight);
-    fill(color(1.*redAlertESC,0.7*(1-redAlertESC),0));
+    fill(color(1.*(alarmOn[i+12] > 0 ? 1 : 0), 0.7*(alarmOn[i+12] > 0 ? 0 : 1), 0));
     ellipse(190.5 + 190.*i + 115.*isRight, 358.5              - fillHeightESC/2., 3., fillHeightESC);    
     stroke(0);
-    drawType("Temp:",              83. + 235.*i + 240.*isRight, 540. - 30.*isHigh, 1.*redAlert,      0.,                 0.);
-    drawType("Temp:",             202. + 190.*i + 115.*isRight, 355.             , 1.*redAlertESC,   0.,                 0.);
+    drawType("Temp:",              83. + 235.*i + 240.*isRight, 540. - 30.*isHigh, 1.*(alarmOn[i+8]  > 0 ? 1 : 0), 0.,                              0.);
+    drawType("Temp:",             202. + 190.*i + 115.*isRight, 355.             , 1.*(alarmOn[i+12] > 0 ? 1 : 0), 0.,                              0.);
     textAlign(RIGHT);
-    drawType(nf(int(temp[i])),    173. + 235.*i + 240.*isRight, 540. - 30.*isHigh, 1.*redAlert,      0.6*(1-redAlert),   0.);
-    drawType(nf(int(temp[i+4])),  282. + 190.*i + 115.*isRight, 355.             , 1.*redAlertESC,   0.6*(1-redAlertESC),0.);
+    drawType(nf(int(temp[i])),    173. + 235.*i + 240.*isRight, 540. - 30.*isHigh, 1.*(alarmOn[i+8]  > 0 ? 1 : 0), 0.6*(alarmOn[i+8]  > 0 ? 0 : 1), 0.);
+    drawType(nf(int(temp[i+4])),  282. + 190.*i + 115.*isRight, 355.             , 1.*(alarmOn[i+12] > 0 ? 1 : 0), 0.6*(alarmOn[i+12] > 0 ? 0 : 1), 0.);
     textFont(smallFont);
-    drawType(nf(int(maxTemp)),     67. + 235.*i + 240.*isRight, 526. - 30.*isHigh, 0.35,             0.35,               0.);    
-    drawType(nf(int(minTemp)),     67. + 235.*i + 240.*isRight, 556. - 30.*isHigh, 0.35,             0.35,               0.);
-    drawType(nf(int(maxTemp)),    186. + 190.*i + 115.*isRight, 331.             , 0.35,             0.35,               0.);    
-    drawType(nf(int(minTemp)),    186. + 190.*i + 115.*isRight, 361.             , 0.35,             0.35,               0.);
+    drawType(nf(int(maxTemp)),     67. + 235.*i + 240.*isRight, 526. - 30.*isHigh, 0.35,                           0.35,                            0.);    
+    drawType(nf(int(minTemp)),     67. + 235.*i + 240.*isRight, 556. - 30.*isHigh, 0.35,                           0.35,                            0.);
+    drawType(nf(int(maxTemp)),    186. + 190.*i + 115.*isRight, 331.             , 0.35,                           0.35,                            0.);    
+    drawType(nf(int(minTemp)),    186. + 190.*i + 115.*isRight, 361.             , 0.35,                           0.35,                            0.);
     textFont(mainFont);
     textAlign(LEFT);
-    drawType("C",                 178. + 235.*i + 240.*isRight, 540. - 30.*isHigh, 0.,               0.,                 0.);
-    drawType("C",                 287. + 190.*i + 115.*isRight, 355.             , 0.,               0.,                 0.);
+    drawType("C",                 178. + 235.*i + 240.*isRight, 540. - 30.*isHigh, 0.,                             0.,                              0.);
+    drawType("C",                 287. + 190.*i + 115.*isRight, 355.             , 0.,                             0.,                              0.);
 
     fillHeight = 40.*(current[i]/(maxCurrent*1.2));
-    if (current[i] > maxCurrent || current[i] < 0.) { redAlert = 1; motorIsRed = 1; escIsRed = 1;
+    if (current[i] > maxCurrent || current[i] < 0.) { motorIsRed = 1; escIsRed = 1;
                                                       if (isHigh == 1) { upperMotorIsRed = 1; }
                                                       else             { lowerMotorIsRed = 1; }
+                                                      if (alarmOn[i+16] == 0) alarmOn[i+16] = 2;
                                                     } 
-    else                                            { redAlert = 0; }
+    else                                            { alarmOn[i+16] = 0; }
     fill(color(1.,1.,1.));
     ellipse(71.  + 235.*i + 240.*isRight, 580.  - 30.*isHigh,                 4., 40.);
-    fill(color(1.*redAlert,0.7*(1-redAlert),0));
+    fill(color(1.*(alarmOn[i+16] > 0 ? 1 : 0), 0.7*(alarmOn[i+16] > 0 ? 0 : 1), 0));
     noStroke();
     ellipse(71.5 + 235.*i + 240.*isRight, 598.5 - 30.*isHigh - fillHeight/2., 3., fillHeight);
     stroke(0);
-    drawType("Curr.:",             83. + 235.*i + 240.*isRight, 580. - 30.*isHigh, 1.*redAlert,      0.,                 0.);
+    drawType("Curr.:",             83. + 235.*i + 240.*isRight, 580. - 30.*isHigh, 1.*(alarmOn[i+16] > 0 ? 1 : 0), 0.,                                0.);
     textAlign(RIGHT);
-    drawType(nf(int(current[i])), 173. + 235.*i + 240.*isRight, 580. - 30.*isHigh, 1.*redAlert,      0.6*(1-redAlert),   0.);
+    drawType(nf(int(current[i])), 173. + 235.*i + 240.*isRight, 580. - 30.*isHigh, 1.*(alarmOn[i+16] > 0 ? 1 : 0), 0.6*(alarmOn[i+16] > 0 ? 0 : 1),   0.);
     textFont(smallFont);
-    drawType(nf(int(maxCurrent)),  67. + 235.*i + 240.*isRight, 571. - 30.*isHigh, 0.35,             0.35,               0.);    
-    drawType("0",                  67. + 235.*i + 240.*isRight, 601. - 30.*isHigh, 0.35,             0.35,               0.);
+    drawType(nf(int(maxCurrent)),  67. + 235.*i + 240.*isRight, 571. - 30.*isHigh, 0.35,                           0.35,                              0.);    
+    drawType("0",                  67. + 235.*i + 240.*isRight, 601. - 30.*isHigh, 0.35,                           0.35,                              0.);
     textFont(mainFont);
     textAlign(LEFT);
-    drawType("A",                 178. + 235.*i + 240.*isRight, 580. - 30.*isHigh, 0.,               0.,                 0.);
+    drawType("A",                 178. + 235.*i + 240.*isRight, 580. - 30.*isHigh, 0.,                             0.,                                0.);
 
     fill(1.0, 0.5*(1.0-motorIsRed), 0.0); 
     makeCylinder(139. + 210.*i + 260.*isRight, 406. - 20.*isHigh, 8., 15.);
@@ -283,11 +299,13 @@ void displayPropulsionSystemInfo() {
   popMatrix();
   
   makePanicButton();
+  if (anyAlarmIsOn()) {
+    soundAlarm();
+    makeSilenceAlarmsButton();
+  }
 }
 
 void displayUM7SystemInfo() {
-  int redAlert = 0;
-  
   pushMatrix(); 
   translate(width/1.6, height/3.5, -30); 
 
@@ -399,99 +417,102 @@ void displayUM7SystemInfo() {
 */
 
   // print out text containing orientation, acceleration, and health info
-  drawType("Yaw:  ",             850.,  40., 0.,      0.,                 0.);
+  drawType("Yaw:  ",             850.,  40., 0.,                        0.,                            0.);
   textAlign(RIGHT);
-  drawType(nf(int(yaw)),         945.,  40., 0.,      0.7,                0.);
+  drawType(nf(int(yaw)),         945.,  40., 0.,                        0.7,                           0.);
   textFont(smallFont);
-  drawType("o",                  952.,  33., 0.,      0.,                 0.);
+  drawType("o",                  952.,  33., 0.,                        0.,                            0.);
   textFont(mainFont);
   textAlign(LEFT);
-  drawType("Pitch:",             850.,  70., 0.,      0.,                 0.);
+  drawType("Pitch:",             850.,  70., 0.,                        0.,                            0.);
   textAlign(RIGHT);
-  drawType(nf(int(pitch)),       945.,  70., 0.,      0.7,                0.);
+  drawType(nf(int(pitch)),       945.,  70., 0.,                        0.7,                           0.);
   textFont(smallFont);
-  drawType("o",                  952.,  63., 0.,      0.,                 0.);
+  drawType("o",                  952.,  63., 0.,                        0.,                            0.);
   textFont(mainFont);
   textAlign(LEFT);
-  drawType("Roll: ",             850., 100., 0.,      0.,                 0.);
+  drawType("Roll: ",             850., 100., 0.,                        0.,                            0.);
   textAlign(RIGHT);
-  drawType(nf(int(roll)),        945., 100., 0.,      0.7,                0.);
+  drawType(nf(int(roll)),        945., 100., 0.,                        0.7,                           0.);
   textFont(smallFont);
-  drawType("o",                  952.,  93., 0.,      0.,                 0.);
+  drawType("o",                  952.,  93., 0.,                        0.,                            0.);
   textFont(mainFont);
   textAlign(LEFT);
 
-  drawType("Axle Rotation",      990.,  20., 0.,      0.,                 0.);
-  drawType("Servo set at:",      990.,  70., 0.,      0.,                 0.);
+  drawType("Axle Rotation",      990.,  20., 0.,                        0.,                            0.);
+  drawType("Servo set at:",      990.,  70., 0.,                        0.,                            0.);
   textAlign(RIGHT);
-  drawType(nf(setting[5],1,1),  1155.,  70., 0.,      0.7,                0.);
+  drawType(nf(setting[5],1,1),  1155.,  70., 0.,                        0.7,                           0.);
   textAlign(LEFT);
-  drawType("/10",               1155.,  70., 0.,      0.,                 0.);
+  drawType("/10",               1155.,  70., 0.,                        0.,                            0.);
   makeButtons(                   972.,  52., 5);
-  drawType("Meas rot ang:  ",    990., 100., 0.,      0.,                 0.);
+  drawType("Meas rot ang:  ",    990., 100., 0.,                        0.,                            0.);
   textAlign(RIGHT);
-  drawType(nf(int(rotAng)),     1150., 100., 0.,      0.7,                0.);
+  drawType(nf(int(rotAng)),     1150., 100., 0.,                        0.7,                           0.);
   textAlign(LEFT);
   textFont(smallFont);
-  drawType("o",                 1150.,  93., 0.,      0.,                 0.);
+  drawType("o",                 1150.,  93., 0.,                        0.,                            0.);
   textFont(mainFont);
-  drawType("Accel  :",           430.,  40., 0.,      0.,                 0.);
-  drawType("z",                  490.,  40., 0.4,     0.6,                1.0);
+  drawType("Accel  :",           430.,  40., 0.,                        0.,                            0.);
+  drawType("z",                  490.,  40., 0.4,                       0.6,                           1.0);
   textAlign(RIGHT);
-  drawType(nfp(accel[2],1,1),    555.,  40., 0.,      0.7,                0.);
+  drawType(nfp(accel[2],1,1),    555.,  40., 0.,                        0.7,                           0.);
   textAlign(LEFT);
-  drawType("m/s",                560.,  40., 0.,      0.,                 0.);
+  drawType("m/s",                560.,  40., 0.,                        0.,                            0.);
   textFont(smallFont);
-  drawType("2",                  589.,  33., 0.,      0.,                 0.);
+  drawType("2",                  589.,  33., 0.,                        0.,                            0.);
   textFont(mainFont);
-  drawType("Accel  :",           430.,  70., 0.,      0.,                 0.);
-  drawType("x",                  490.,  70., 0.9,     0.5,                0.5);
+  drawType("Accel  :",           430.,  70., 0.,                        0.,                            0.);
+  drawType("x",                  490.,  70., 0.9,                       0.5,                           0.5);
   textAlign(RIGHT);
-  drawType(nfp(accel[0],1,1),    555.,  70., 0.,      0.7,                0.);
+  drawType(nfp(accel[0],1,1),    555.,  70., 0.,                        0.7,                           0.);
   textAlign(LEFT);
-  drawType("m/s",                560.,  70., 0.,      0.,                 0.);
+  drawType("m/s",                560.,  70., 0.,                        0.,                            0.);
   textFont(smallFont);
-  drawType("2",                  589.,  63., 0.,      0.,                 0.);
+  drawType("2",                  589.,  63., 0.,                        0.,                            0.);
   textFont(mainFont);
-  drawType("Accel  :",           430., 100., 0.,      0.,                 0.);
-  drawType("y",                  490., 100., 0.,      0.7,                0.);
+  drawType("Accel  :",           430., 100., 0.,                        0.,                            0.);
+  drawType("y",                  490., 100., 0.,                        0.7,                           0.);
   textAlign(RIGHT);
-  drawType(nfp(accel[1],1,1),    555., 100., 0.,      0.7,                0.);
+  drawType(nfp(accel[1],1,1),    555., 100., 0.,                        0.7,                           0.);
   textAlign(LEFT);
-  drawType("m/s",                560., 100., 0.,      0.,                 0.);
+  drawType("m/s",                560., 100., 0.,                        0.,                            0.);
   textFont(smallFont);
-  drawType("2",                  589.,  93., 0.,      0.,                 0.);
+  drawType("2",                  589.,  93., 0.,                        0.,                            0.);
   textFont(mainFont);
-  drawType("Accel",              637.,  20., 0.,      0.,                 0.);
-  drawType("vectors",            627.,  40., 0.,      0.,                 0.);
-  drawType("Orientation",        723.,  20., 0.,      0.,                 0.);
+  drawType("Accel",              637.,  20., 0.,                        0.,                            0.);
+  drawType("vectors",            627.,  40., 0.,                        0.,                            0.);
+  drawType("Orientation",        723.,  20., 0.,                        0.,                            0.);
 
-  drawType("Orientation sensor", 430., 260., UM7health, 0.,               0.);
-  drawType("health: ",           430., 285., UM7health, 0.,               0.);
+  drawType("Orientation sensor", 430., 260., UM7health,                 0.,                            0.);
+  drawType("health: ",           430., 285., UM7health,                 0.,                            0.);
   if (UM7health == 0) {
-    drawType("OK",               515., 285., 0.,        0.7,              0.);
+    alarmOn[20] = 0;
+    drawType("OK",               515., 285., 0.,                        0.7,                           0.);
   } else {
-    drawType("PROBLEM",          515., 285., 1.,        0.,               0.);
+    if (alarmOn[20] == 0) alarmOn[20] = 2;
+    drawType("PROBLEM",          515., 285., 1.,                        0.,                            0.);
   }
 
-  if (UM7temp > maxTemp || UM7temp < minTemp) redAlert = 1;
+  if (UM7temp > maxTemp || UM7temp < minTemp) if (alarmOn[21] == 0) alarmOn[21] = 2;
+  else                                        alarmOn[21] = 0;
   float fillHeight = 40.*((UM7temp - minTemp)/((maxTemp - minTemp)*1.2));
-  fill(color(1.,1.,1.));
+  fill(color(1.,                           1.,                            1.));
   ellipse(685.,  270.                  , 4., 40.);
   noStroke();
-  fill(color(1.*redAlert,   0.7*(1-redAlert),   0.));
+  fill(color(1.*(alarmOn[21] > 0 ? 1 : 0), 0.7*(alarmOn[21] > 0 ? 0 : 1), 0.));
   ellipse(685.5, 288.5  - fillHeight/2., 3., fillHeight);    
   stroke(0);
-  drawType("Orientation sensor", 697., 260., redAlert,  0.,               0.);
-  drawType("temp: ",             697., 285., redAlert,  0.,               0.);
+  drawType("Orientation sensor", 697., 260., (alarmOn[21] > 0 ? 1 : 0), 0.,                            0.);
+  drawType("temp: ",             697., 285., (alarmOn[21] > 0 ? 1 : 0), 0.,                            0.);
   textAlign(RIGHT);
-  drawType(nf(int(UM7temp)),     777., 285., redAlert,  0.7*(1-redAlert), 0.);
+  drawType(nf(int(UM7temp)),     777., 285., (alarmOn[21] > 0 ? 1 : 0), 0.7*(alarmOn[21] > 0 ? 0 : 1), 0.);
   textFont(smallFont);
-  drawType(nf(int(maxTemp)),     681., 261., 0.35,      0.35,             0.);    
-  drawType(nf(int(minTemp)),     681., 291., 0.35,      0.35,             0.);
+  drawType(nf(int(maxTemp)),     681., 261., 0.35,                      0.35,                          0.);    
+  drawType(nf(int(minTemp)),     681., 291., 0.35,                      0.35,                          0.);
   textFont(mainFont);
   textAlign(LEFT);
-  drawType("C",                  782., 285., 0.,        0.,               0.);
+  drawType("C",                  782., 285., 0.,                        0.,                            0.);
 
 }
 
@@ -624,7 +645,7 @@ void makePanicButton() {
     }
     stroke(1., 1., 1.);
   } else {
-    fill(1., 1., 1.);
+    fill(1., 0.8, 0.8);
     stroke(1., 0., 0.);
   }
   rect(x,                        y,                                      xSize,      ySize, cornerRadius);  
@@ -632,9 +653,51 @@ void makePanicButton() {
   stroke(0., 0., 0.);
 }
 
+void makeSilenceAlarmsButton() {
+  final float x = 1020., y = 280.;
+  final float xSize = 110., ySize = 65., cornerRadius = 15.;
+
+  if (mouseX > x && mouseX < x+xSize && 
+      mouseY > y && mouseY < y+ySize) {
+    if (mousePressed && !blockButtons) {
+      fill(1.,0.,0.);
+      println("Silencing alarms.");
+      for (int i = 0; i < numAlarms; ++i) {
+        if (alarmOn[i] == 2) alarmOn[i] = 1;
+      }
+      blockButtons = true;
+      thread("buttonBlock");
+    } else {
+      fill(1., 1., 0.);
+    }
+    stroke(1., 1., 1.);
+  } else {
+    fill(1., 1., 0.7);
+    stroke(0., 0., 0.);
+  }
+
+  rect(x,                        y,                                      xSize,      ySize, cornerRadius);  
+  drawType("Silence",            x+20.,  y+20., 0.,      0.,                 0.);
+  drawType("present",            x+20.,  y+38., 0.,      0.,                 0.);
+  drawType("alarms",             x+26.,  y+56., 0.,      0.,                 0.);
+  stroke(0., 0., 0.);  
+}
+
 void buttonBlock() {
    delay(300);
    blockButtons = false;
+}
+
+boolean anyAlarmIsOn() {
+  for (int i = 0; i < numAlarms; ++i) {
+    if ( alarmOn[i] == 2 ) return true;
+  }
+  return false;
+}
+
+void soundAlarm() {
+  if (alarmCounter % timeBetweenAlarmSounds == 0) alarm.play();
+  ++alarmCounter;
 }
 
 void setFakeAltairValues() {
