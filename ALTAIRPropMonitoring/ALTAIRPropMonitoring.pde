@@ -48,11 +48,11 @@ void setup()  {
   smooth(5);
 
   String arduinoPortName = findSubstring(Serial.list(), arduinoPortString1);
-  if (arduinoPortName.equals("") arduinoPortName = findSubstring(Serial.list(), arduinoPortString2);
+  if (arduinoPortName.equals("")) arduinoPortName = findSubstring(Serial.list(), arduinoPortString2);
   if (arduinoPortName.equals("") && !testArduinoUnconnected) {
     println("ERROR: No ARDUINO serial port connection found!!!  Here is the list of available serial ports:");
     println(Serial.list());
-    print("We were looking for a port name containing the string: "); println(arduinoPortString);
+    print("We were looking for a port name containing one of the strings: "); println(arduinoPortString1); println(arduinoPortString2);
     println("Since an ARDUINO port connection does not appear to be among the serial ports, the PROGRAM IS NOW EXITING!!!");
     exit();
   } else {
