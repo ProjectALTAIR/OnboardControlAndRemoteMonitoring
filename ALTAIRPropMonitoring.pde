@@ -3,7 +3,8 @@ import processing.sound.*;
 
 final boolean testArduinoUnconnected =  true;
 final String  fontString             = "SourceCodePro-Regular";
-final String  arduinoPortString      = "tty.usbmodem";
+final String  arduinoPortString1     = "tty.usbmodem";
+final String  arduinoPortString2     = "COM4";
 final int     portSpeed              =  9600;
 final int     numAlarms              =    22;
 final int     timeBetweenAlarmSounds =    30;    // in approximately 20's of milliseconds (so e.g. a value of 30 ~= 0.6 seconds)
@@ -46,7 +47,8 @@ void setup()  {
   strokeWeight(0.5);
   smooth(5);
 
-  String arduinoPortName = findSubstring(Serial.list(), arduinoPortString);
+  String arduinoPortName = findSubstring(Serial.list(), arduinoPortString1);
+  if (arduinoPortName.equals("") arduinoPortName = findSubstring(Serial.list(), arduinoPortString2);
   if (arduinoPortName.equals("") && !testArduinoUnconnected) {
     println("ERROR: No ARDUINO serial port connection found!!!  Here is the list of available serial ports:");
     println(Serial.list());
@@ -59,7 +61,7 @@ void setup()  {
       print("Connected to ALTAIR via serial port: "); println(arduinoPortName); 
     }
 
-    alarm      = new SoundFile(this, "/Users/jalbert/Documents/Processing/sketch_160421a/Arrow.wav");
+    alarm      = new SoundFile(this, "Alarm.wav");
     for (int i = 0; i < numAlarms; ++i) alarmOn[i] = 0;
 
     mainFont   = createFont(fontString, 17);
