@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+	<head>
+		<title>Arduino Propulsion Documentation</title>
+	</head>
+	<body>
+		<h1>Arduino Propulsion Code Documentation</h1>
+		<h2>Using multiple files</h2>
+			<p> The arduino compiles sketches that are composed of multiple .ino files by appending the extra files to the end of the main file in alphabetical order to make one larger file for compiliation. It also adds function prototypes to the top of the file before compiling. The consequence of this is that any global variables must be declared at the top of the main file instead of in secondary files.</p>
+		<h2>RPMfunction.ino</h2>
+			<p>This file contains every function that is needed for the rpm sensors to work.</p>
+		<h2>communications.ino</h2>
+			<p>This file contains the functions for communicating with the host computer, and the UM7 sensor.</p>
+		<h2>ALTAIRPropControl.ino (main file)</h2>
+			<p>At the top of the file contains all of the global variables that the code uses, and a reference to a library that allows for the use of interrupts on the analog pins.</p>
+			<p>The setup() function initializes the inputs and outputs and starts the serial communications.</p>
+			<p>Each loop of the loop() function finds values from all of the sensors, checks for a command from the host computer, gets info from the UM7 and returns information to the host computer.</p>
+		<h2>Known errors and their fixes</h2>
+			<p>'nullptr' not defined. This can occur at compile time, and is fixed my modifying the arduino's platform.txt file to force the ide to use a newer c++ compiler standard (c++11 or newer)</p>
+	</body>
+</html>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+	<head>
+		<title>Processing Monitoring Documentation</title>
+	</head>
+	<body>
+		<h1>Processing Prop Control Documentation</h1>
+		<h2>Primary Classes</h2>
+			<h3>AltairPropulsion</h3>
+				<p>This is the first important class of the program. It represents the propulsion system itself. On it's own it draws the body of altair on the screen and makes the silence and panic buttons</p>
+				<p>This class has instances of the following classes: 
+					<ul>
+					<li>Propeller class (x4)</li>
+					<li>SpeedController class (x4)</li>
+					<li>Axle class (x1)</li>
+					<li>UM7Sensor class (x1)</li>
+					</ul></p>
+				<p>This class has the following functions:
+					<table border="1px, black">
+					<tr><th>Method</th><th>Explaination</th></tr>
+					<tr><td>AltairPropulsion(int x, int y);</td><td>This is the constructor where x,y is the location on the screen to be drawn</td></tr>
+					<tr><td>DrawAltair();</td><td>This draws altair, its component classes, and all of its information.</td></tr>
+					<tr><td>updateData(float[] setting, float[] rpm, float[] current, float[] temp, float[] accel, float yaw, float pitch, float roll, float UM7Health, float UM7temp, float rotAng);</td><td>This parses the information into altair and its component classes.</td></tr>
+					<tr><td>anyAlarmOn();</td><td>This returns the true/fals state of any alarm being on or off/silenced. (Private method)</td></tr>
+					<tr><td>silenceAllAlarms();</td><td>This simply silences all of the alarms that are currently on.</td></tr>
+					<tr><td>soundAlarmIfOn();</td><td>This will sound the alarm if any of the alarms are on.</td></tr>
+					</table></p>
+		<h3>SpeedController</h3>
+			<p>This class represents the information for an instance of the speed controller.<p>
+			<p>This class has the following public functions:
+				<table border="1px, black">
+					<tr><th>Method</th><th>Explaination</th></tr>
+					<tr><td>SpeedController(int x, int y);</td><td>This is the constructor where x,y is the location on the screen to be drawn</td></tr>
+					<tr><td>updateData(float servoSetting, float measRotAng, float[] rpm);</td><td>This method parses new data to be displayed for the speed controller, and it is called be the updateData method of the AltairPropulsion class</td></tr>
+					<tr><td>drawSpeedController();</td><td>This draws the speed controller and all of its information. This method is called by the drawALTAIR function in the AltairPropulsion class</td></tr>
+				</table></p>
+			<p><font color="red">It should be noted that the text may not display perfect for this data on some screens. A small code code may need to be made. Problem unique to this one class. If this occurs, fix by changing a few numbers in the drawSpeedController function underneath the comment "//text and labels"</font></p>
+		<h3>Propeller</h3>
+			<p>This class represents the information for the propellers</p>
+			<p>This class has the following public functions:
+				<table border="1px, black">
+					<tr><th>Method</th><th>Explaination</th></tr>
+					<tr><td>Propeller(int x, int y, int propNum);</td><td>This is the constructor where x,y is the location on the screen to be drawn, and propNum is the number of the propeller (0,1,2, or 3). propNum is used to assist the drawing of this class.</td></tr>
+					<tr><td>updateData(float rpm, float temp, float current, float powerSetting);</td><td>This method parses new data to be displayed for the propeller, and it is called be the updateData method of the AltairPropulsion class</td></tr>
+					<tr><td>drawProp();</td><td>This draws the propeller and all of its information. This method is called by the drawALTAIR function in the AltairPropulsion class</td></tr>
+				</table></p>
+		<h3>Axle</h3>
+			<p>This class represents the information for the axle's servo setting and rotation angle.<p>
+			<p>This class has the following public functions:
+				<table border="1px, black">
+					<tr><th>Method</th><th>Explaination</th></tr>
+					<tr><td>Axle(int x, int y);</td><td>This is the constructor where x,y is the location on the screen to be drawn</td></tr>
+					<tr><td>updateData(float servoSetting, float measRotAng, float[] rpm);</td><td>This method parses new data to be displayed for axle and it is called be the updateData method of the AltairPropulsion class</td></tr>
+					<tr><td>drawAxle();</td><td>This draws the axle and all of its information. This method is called by the drawALTAIR function in the AltairPropulsion class</td></tr>
+				</table></p>
+		<h3>UM7Sensor</h3>
+			<p>This class represents all the information from the UM7Sensor.<p>
+			<p>This class has the following public functions:
+				<table border="1px, black">
+					<tr><th>Method</th><th>Explaination</th></tr>
+					<tr><td>UM7Sensor(int x, int y);</td><td>This is the constructor where x,y is the location on the screen to be drawn</td></tr>
+					<tr><td>updateData(float yaw, float pitch, float roll, float health, float temp, float[] accel);</td><td>This method parses new data to be displayed for UM7Sensor and it is called be the updateData method of the AltairPropulsion class</td></tr>
+					<tr><td>drawUM7();</td><td>This draws the UM7 and all of its information. This method is called by the drawALTAIR function in the AltairPropulsion class</td></tr>
+				</table></p>
+		<h2>Helper Functions and Classes</h2>
+		<h3>Button Functions</h3>
+			<p>This functions are automatically called when the button of the same name is pressed</p>
+			<p>This Functions include
+				<ul>
+				<li>Panic();</li>
+				<li>SilenceAlarms();</li>
+				<li>increaseSetting(int value); //where value indicates which motor the command goes to.</li>
+				<li>decreaseSetting(int value); //where value indicated which motor the command goes to.</li>
+				</ul></p>
+		<h3>FillBar</h3>
+			<p>FillBar is a class the assists in the drawing of bars the display a value bewteen a minimum and a maximum, and the labels for the bar itself.</p>
+			<p>This class has the following public functions:
+				<table border="1px, black">
+					<tr><th>Method</th><th>Explaination</th></tr>
+					<tr><td>FillBar(int x, int y, float min, float max, String valueName, String valueUnit, boolean displayDecimals);</td><td>This is the constructor where x,y is the location on the screen to be drawn</td></tr>
+					<tr><td>drawBar(float value);</td><td>This draws the fillBar, and all of its information at the given value. This method is called by the draw function of whatever class implements it.</td></tr>
+				</table></p>
+		
+		<h2>Primary File (ALTAIRPropMonitoring.pde)</h2>
+			<p>At the top of the primary file are the declarations for the constants and values needed by the program including the instances of the GUI controllers and the AltairPropulsion class.</p>
+			<p>The setup() method sets the initial drawing conditions and atempts to connect to the arduino. If an arduino is not found, the program defaults to fake data. <font color="red">If multiple devices are connected to the computer via usb the program may attemp to connect to the wrong one.</font> Fix by changing the portString to a more specific name.</p>
+			<p>On every loop of the loop() method the program paints the background colour the the program, gets information from the altair propulsion system, displays that information, and then checks to see in any of the alarms are on.</p>
+		<h3>Software Design Choices</h3>
+			<p>The control5P library doesn't allow for multiple buttons with the same name to be connected to the same GUI controller, since the button methods are called based on the name of the button, an array of GUI controllers were used in order to allow for multiple instanced of buttons with the same name but different values.</p>
+			<p>The global arrays of data should be removed (with a slight code change to the getALTAIRInfoLine() function ) since all of this data can be accessed though the publically available values from the ALTAIRPropulsion class. However, they have been left in for similarity with the old code prior to the this rewrite.</p>
+	<body>
+</html>
