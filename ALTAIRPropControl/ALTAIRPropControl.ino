@@ -1,113 +1,156 @@
-import controlP5.*;
-import processing.serial.*;
-import processing.sound.*;
+// Our Arduino code for propulsion and attitude control
+#include <YetAnotherPcInt.h> //library for attaching interrupts to A14, A15 (using library verson 2.1.0)
+                             //If nullptr not declared in scope error occurs, update to a more recent version of the avr-gcc compiler
 
-boolean       isArduinoConnected     = true;
-final String  fontString             = "SourceCodePro-Regular";
-final String  arduinoPortString1     = "tty.usbmodem";   //For Macs
-final String  arduinoPortString2     = "COM";            //For Windows
-final int     portSpeed              =  9600;
-final float   gravAcc                =  9.81;            // m/s^2
+const int ledPin = 13;      // The pin that the LED is attached to.
+// Pins 2, 3, and 5 correspond to timer 3 pins.  Pins 6, 7, and 8 correspond to timer 4 pins.
+const int pwmPin[6]      = { 2, 3, 5, 6, 7, 8 };
+float     setting[7]     = { 0., 0., 0., 0., 0., 7., 0. };
+// Pulse timing for measuring the 4 RPMs.
+const int rpmTimerPin[4] = { A13, A14, A15, 18 };
+const int numRPMPulsesToAverage = 20;
+const long    numMicrosBeforeRPMTimeout = 1000000;
+const long    numMicrosPerMinute = 60000000;
+const int     numMicrosDelayBtwReads = 20;
+const int     numPulsesPerRevolution = 4;
+int       channelToModify = 0;
+const int currentSensorPin[4] = { A0, A1, A2, A3 };
+int       currentSensorValue[4];
+const int numCurrentValsToAverage = 20;
+float     currentInAmps[4][numCurrentValsToAverage];  // average the past 20 values
+const int tempSensorPin[8] = { A10, A9, A6, A4, A11, A8, A7, A5 }; //A11,A10 may need to be swapped
+int       tempSensorValue;
+float     tempInCelsius[8] = { 0., 0., 0., 0., 0., 0., 0., 0. };
+const int rotAngSensorPin  = A12;
+float     rotAng = 0.0;
+float     UM7health = 0.0, UM7temp = 0.0;
 
-PFont         mainFont, smallFont;
+const unsigned int rx_read_length = 200;
+float yaw     = -999., pitch     = -999., roll     = -999.;
+float yawRate = -999., pitchRate = -999., rollRate = -999.;         //In degrees per second
+float accel[3] = { -999., -999., -999. };
+float accelCorrectionFactor[3] = { 0., 0., 0. };
 
-Serial        port;
-SoundFile     alarm;
+//Interrupt service routines (ISR) variables
+//Volatile variables are used outside the ISRs too.
+volatile byte          halfRotations[4]  = {0, 0, 0, 0};            //Keeps track of how much of a rotation is completed
+byte                   placeData[4]      = {0, 0, 0, 0};            //Keeps track of where in the pulseDurations array to place the newest piece of data
+volatile unsigned long startTimePulse[4] = {-999,-999,-999,-999};
+unsigned long          endTimePulse[4];
+volatile long          pulseDurations[4][numRPMPulsesToAverage];
+//End of ISR variables
 
-float[]       setting      = new float[7];
-float[]       rpm          = new float[4];
-float[]       current      = new float[4];
-float[]       temp         = new float[8];
-float[]       accel        = new float[3];
-float         yaw, pitch, roll, rotAng;
-float         UM7health, UM7temp;
+struct UM7packet {
+  byte  Address;
+  byte  PT;
+  unsigned int Checksum;
+  byte  data_length;
+  byte  data[75];
+};
 
-ControlP5[] GUI = new ControlP5[5];
-AltairPropulsion module;
-boolean inSetup;
+typedef union {
+  byte  array[4];
+  float value;
+} ByteToFloat;
 
-void setup(){
-  inSetup = true;
-  
-  size(1200,650,P3D);
-  colorMode(RGB , 1);
-  stroke(0);
-  strokeWeight(.5);
-  smooth(5);
-  mainFont  = createFont(fontString, 17);
-  smallFont = createFont(fontString, 10);
-  
-  String arduinoPortName = findSubstring(Serial.list(), arduinoPortString1);
-  if (arduinoPortName.equals("")) arduinoPortName = findSubstring(Serial.list(), arduinoPortString2);
-  if (arduinoPortName.equals("")) {
-    println("No Arduino serial port connection found. Here is a list of available serial ports");
-    println(Serial.list());
-    println("We were looking for a port containing one of the strings: ");
-    println(arduinoPortString1); println(arduinoPortString2);
-    println("Since no port was found, we will use fake data instead.");
-    isArduinoConnected = false;
+float convertBytesToFloat(byte* data) {
+  ByteToFloat converter;
+  for (byte i = 0; i < 4; i++) {
+    converter.array[3 - i] = data[i]; //or converter.array[i] = data[i]; if the endian were reversed
   }
-  if (isArduinoConnected){
-    port = new Serial(this, arduinoPortName, portSpeed);
-    print("Connectedto ALTAIR via the serial port: "); println(arduinoPortName);
-  }
-  
-  alarm = new SoundFile(this, "Alarm.wav");
-  for (int i = 0; i < 5; i++) GUI[i] = new ControlP5(this,mainFont);
-  module = new AltairPropulsion(135,400);
-  
-  inSetup = false;
+  return converter.value;
 }
 
-void draw(){
-  background(1);
-  getAltairArduinoInfoLine();
-  module.drawAltair();
-  module.soundAlarmIfOn();
+void getAccelCorrectionFactors() {
+
 }
 
-void getAltairArduinoInfoLine() {
-  if (!isArduinoConnected) {
-    setFakeAltairValues();
-  } else {
-    String  infoLine = port.readStringUntil('\n');
-    if (infoLine != null) {
-      print("Received line: "); println(infoLine);
-      if (infoLine.length() > 50) {
-        float[] altairValues = float(splitTokens(infoLine));
-        println("Line num characters: " + infoLine.length() + "   Line num floats: " + altairValues.length);
-        if (altairValues.length == 32) {
-          for (int i = 0; i < 7; ++i) setting[i] = altairValues[i];                  // on a floating-point scale from 0. to 10.
-          for (int i = 0; i < 4; ++i) rpm[i]     = altairValues[i+7];
-          for (int i = 0; i < 4; ++i) current[i] = altairValues[i+11];               // in amps
-          for (int i = 0; i < 8; ++i) temp[i]    = altairValues[i+15];               // in degrees C
-          for (int i = 0; i < 3; ++i) accel[i]   = altairValues[i+23];               // in "gravities" (converted to m/s^2 below)
-          yaw = altairValues[26]; pitch = altairValues[27]; roll = altairValues[28]; // in degrees
-          rotAng = altairValues[29];  // propulsion axle rotation angle (wrt a perfect vertical alignment with the gondola body), in degrees
-          UM7health = altairValues[30]; UM7temp = altairValues[31];
-          accel[2] += cos(radians(pitch))*cos(radians(roll));  accel[2] *= gravAcc;  // Subtract off Earth's gravitational acceleration, so that
-          accel[1] += cos(radians(pitch))*sin(radians(roll));  accel[1] *= gravAcc;  // "hovering" should result in IDENTICALLY 0 ACCELERATION,
-          accel[0] -= sin(radians(pitch));                     accel[0] *= gravAcc;  // and *= by 9.81, in order to convert "gravities" to m/s^2.        
-        }
+void setup() {
+  // initialize both serial ports:
+  Serial.begin(9600);
+  Serial3.begin(115200, SERIAL_8N1);
+
+  // initialize digital pins 2, 3, 5, 6, 7, 8 as output.
+  for (int i = 0; i < 6; ++i) pinMode(pwmPin[i], OUTPUT);
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < numCurrentValsToAverage; ++j) currentInAmps[i][j] = 0.;
+  }
+
+  initializeRPMsensors();
+
+  // initialize the CHRobotics UM7 yaw-pitch-roll monitor
+  checkUM7Health();
+  getAccelCorrectionFactors();
+
+  // start up the PWM outputs
+  TCCR3A = _BV(COM3A1) | _BV(COM3B1) | _BV(COM3C1) | _BV(WGM32) | _BV(WGM31);
+  TCCR3B = _BV(CS32);
+  TCCR4A = _BV(COM4A1) | _BV(COM4B1) | _BV(COM4C1) | _BV(WGM42) | _BV(WGM41);
+  TCCR4B = _BV(CS42);
+
+  OCR3A = 32 + 2 * setting[0]; // pin 5, servo 0
+  OCR3C = 32 + 2 * setting[1]; // pin 3, servo 1
+  OCR4B = 32 + 2 * setting[2]; // pin 7, servo 2
+  OCR4A = 32 + 2 * setting[3]; // pin 6, servo 3
+  OCR3B = 32 + 2 * setting[4]; // pin 2,
+  OCR4C = 32 + 2 * setting[5]; // pin 8, axle servo
+}
+
+void loop() {
+  static int loopCount = 0;
+  byte inputByte;
+  boolean thingsHaveChanged = false;
+  double rpm[4] = { 0., 0., 0., 0. };
+  float  currentRunningAverage[4] = { 0., 0., 0., 0. };
+  int yawInt = -999, pitchInt = -999, rollInt = -999;
+  int yawRateInt = -999; int pitchRateInt = -999; int rollRateInt = -999;
+
+  for (int i = 0; i < 4; ++i) {
+    currentSensorValue[i] = analogRead(currentSensorPin[i]);
+    for (int j = 0; j < numCurrentValsToAverage - 1; ++j) {
+      currentRunningAverage[i] += currentInAmps[i][j + 1];
+      currentInAmps[i][j] = currentInAmps[i][j + 1];
+    }
+    currentInAmps[i][numCurrentValsToAverage - 1] = (505 - currentSensorValue[i]) / 3.3;
+    currentRunningAverage[i] += currentInAmps[i][numCurrentValsToAverage - 1];
+    currentRunningAverage[i] /= numCurrentValsToAverage;
+  }
+  tempSensorValue = analogRead(tempSensorPin[loopCount % 8]);
+  tempInCelsius[loopCount % 8] = 22 + (tempSensorValue - 535) / 2.;
+  for (int i = 0; i < 4; ++i) {
+    if (loopCount % 10 == 0){ //Only check if the rotors have stopped every 10 cyles.
+      isSpinning(i);
+    }
+    rpm[i] = getRPM(i);
+  }
+  rotAng = analogRead(rotAngSensorPin);
+
+  // This accepts an input from the usb port and interprets it
+  if (Serial.available()) {
+    //Serial.flush();
+    inputByte = Serial.read();
+    if (inputByte == 'm') {
+      inputByte = Serial.read();
+      if (inputByte == 's') {
+        thingsHaveChanged = true;
+        inputByte = Serial.read();
+        doInstruction(inputByte, &thingsHaveChanged);
       }
     }
   }
-  module.updateData(setting,rpm,current,temp,accel,yaw,pitch,roll,UM7health,UM7temp,rotAng);
-}
-void setFakeAltairValues() {
-  for (int i = 0; i < 7; ++i) setting[i] = 2.9211;
-  for (int i = 0; i < 4; ++i) rpm[i]     = 5100.;
-  for (int i = 0; i < 4; ++i) current[i] = 0.;
-  for (int i = 0; i < 8; ++i) temp[i]    = 0.;
-  for (int i = 0; i < 3; ++i) accel[i]   = 0.;
-  temp[5] = 40.;
-  accel[2] = -0.5;
-  accel[0] = -0.5;
-  rotAng = 30.;
-  rpm[2] = 0.;
-  rpm[1] = 4001;
-  yaw = 0.; pitch = 0.; roll = 0.;
-  UM7health = 0.; UM7temp = 0.;   
-  //current[2] = 60;
-  setting[5] = 3;
+  // CHRobotics UM-7 connected to serial port 3, Serial Monitor connected to serial port 0:
+  if (Serial3.available()) {
+    getDataFromUM7();
+    sendALTAIRinfoLine(rpm, currentRunningAverage);
+
+    if (thingsHaveChanged) {
+      OCR3A = 32 + 2 * setting[0]; //pin 5, servo 0
+      OCR3C = 32 + 2 * setting[1]; //pin 3, servo 1
+      OCR4B = 32 + 2 * setting[2]; //pin 7, servo 2
+      OCR4A = 32 + 2 * setting[3]; //pin 6, servo 3
+      OCR3B = 32 + 2 * setting[4]; //pin 2
+      OCR4C = 32 + 2 * setting[5]; //pin 8, axle servo
+    }
+  }
+  loopCount++;
 }
